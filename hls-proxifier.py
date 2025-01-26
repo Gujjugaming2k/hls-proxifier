@@ -33,6 +33,7 @@ def is_absolute_url(url):
     return bool(parsed_url.scheme) and bool(parsed_url.netloc)
 
 def configure_single(m3u8_obj, base_url, json_stream_headers):
+    # Handle video playlists
     for playlist in m3u8_obj.playlists:
         if not is_absolute_url(playlist.uri):
             stream_base = base_url
@@ -42,14 +43,32 @@ def configure_single(m3u8_obj, base_url, json_stream_headers):
             is_absolute = True
 
         playlist.uri = url_for(
-            "handle_single", 
-            slug=playlist.uri, 
-            base=stream_base, 
-            absolute=is_absolute, 
-            headers=json.dumps(json_stream_headers)
+            "handle_single",
+            slug=playlist.uri,
+            base=stream_base,
+            absolute=is_absolute,
+            headers=json.dumps(json_stream_headers),
+        )
+
+    # Handle audio streams (EXT-X-MEDIA)
+    for media in m3u8_obj.media:
+        if not is_absolute_url(media.uri):
+            media_base = base_url
+            is_absolute = False
+        else:
+            media_base = None
+            is_absolute = True
+
+        media.uri = url_for(
+            "handle_single",
+            slug=media.uri,
+            base=media_base,
+            absolute=is_absolute,
+            headers=json.dumps(json_stream_headers),
         )
 
     return m3u8_obj
+
 
 def configure_segments(m3u8_obj, base_url, json_stream_headers):
     for segment in m3u8_obj.segments:
@@ -102,7 +121,7 @@ def hls_proxy():
         stream_headers = json.loads(stream_headers)
     else:
         stream_headers = {}
-    
+
     for _ in range(MAX_RETRIES):
         try:
             response = requests.get(stream_url, headers=stream_headers)
@@ -110,11 +129,11 @@ def hls_proxy():
             break
         except:
             continue
-    
+
     m3u8_obj = m3u8.loads(response.text)
-    
+
     if m3u8_obj.is_variant:
-        if not len(m3u8_obj.playlists) < 2:
+        if len(m3u8_obj.playlists) >= 2:
             m3u8_obj = configure_single(m3u8_obj, get_base_url(response.url), stream_headers)
         else:
             uri = m3u8_obj.playlists[0].uri
@@ -126,6 +145,7 @@ def hls_proxy():
 
     m3u8_obj = configure_keys(m3u8_obj, get_base_url(response.url), stream_headers)
     return Response(m3u8_obj.dumps(), content_type="application/vnd.apple.mpegurl")
+
 
 @proxy.route("/single")
 def handle_single():
